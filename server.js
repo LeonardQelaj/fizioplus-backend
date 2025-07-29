@@ -4,6 +4,7 @@ const cloudinary = require("cloudinary").v2;
 const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
+const { auth } = require("express-oauth2-jwt-bearer");
 
 const app = express();
 app.use(
@@ -16,17 +17,32 @@ app.use(
 );
 
 app.use(express.json());
+const checkJwt = auth({
+  audience: "https://fizioplus-api",
+  issuerBaseURL: "https://fizioplus.auth0.com/",
+});
 
+// Konfigurimi për Cloudinary
 cloudinary.config({
   cloud_name: "dt3j5h79o",
   api_key: "328292542925552",
   api_secret: "z_UDM6vdSussXTL5L-PqDUb0WkE",
 });
 
-// Store SSE clients
+// Sigurohu që ekziston folderi 'data'
+const dataDir = path.join(__dirname, "data");
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir);
+}
+
+// Rrugët absolute për skedarët
+const IMAGES_FILE = path.join(dataDir, "images.json");
+const TEAM_FILE = path.join(dataDir, "team.json");
+
+// SSE klientët
 let clients = [];
 
-// Helper to send events to all clients
+// Funksion për të dërguar ngjarje te të gjithë klientët
 function sendEventToAll(eventName, data) {
   clients.forEach((res) => {
     res.write(`event: ${eventName}\n`);
@@ -36,7 +52,6 @@ function sendEventToAll(eventName, data) {
 
 // SSE endpoint
 app.get("/updates", (req, res) => {
-  // Set headers for SSE
   res.set({
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
@@ -44,19 +59,16 @@ app.get("/updates", (req, res) => {
   });
   res.flushHeaders();
 
-  // Send a comment to keep connection alive in some proxies
-  res.write(":\n\n");
+  res.write(":\n\n"); // Keep-alive për proxies
 
-  // Add this client to list
   clients.push(res);
 
-  // Remove client when connection closes
   req.on("close", () => {
     clients = clients.filter((client) => client !== res);
   });
 });
 
-// Upload image to Cloudinary
+// Upload image në Cloudinary
 app.post("/api/upload", async (req, res) => {
   try {
     const result = await cloudinary.uploader.upload(req.body.image, {
@@ -68,15 +80,14 @@ app.post("/api/upload", async (req, res) => {
   }
 });
 
-// Save image config and notify SSE clients
-app.post("/api/save-images", (req, res) => {
-  fs.writeFile("images.json", JSON.stringify(req.body), (err) => {
+// Ruaj konfigurimin e fotove dhe njofto klientët
+app.post("/api/save-images", checkJwt, (req, res) => {
+  fs.writeFile(IMAGES_FILE, JSON.stringify(req.body, null, 2), (err) => {
     if (err) {
       console.error("Gabim në ruajtjen e fotove:", err);
       return res.status(500).json({ success: false });
     }
 
-    // Notify all SSE clients about each updated key and url
     Object.entries(req.body).forEach(([key, url]) => {
       sendEventToAll("imageUpdate", { key, url });
     });
@@ -85,28 +96,20 @@ app.post("/api/save-images", (req, res) => {
   });
 });
 
-// Get image config
+// Merr konfigurimin e fotove
 app.get("/api/get-images", (req, res) => {
   try {
-    const data = fs.readFileSync("images.json");
+    if (!fs.existsSync(IMAGES_FILE)) {
+      return res.json({});
+    }
+    const data = fs.readFileSync(IMAGES_FILE);
     res.json(JSON.parse(data));
   } catch (error) {
     res.json({});
   }
 });
 
-app.get("/", (req, res) => {
-  res.send("FizioPlus API Server is running");
-});
-
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).send("Something broke!");
-});
-// File path ku do ruhen anëtarët
-const TEAM_FILE = path.join(__dirname, "team.json");
-
-// Merr listën e anëtarëve
+// Endpoint për të marrë anëtarët e ekipit
 app.get("/api/team", (req, res) => {
   try {
     if (!fs.existsSync(TEAM_FILE)) {
@@ -120,7 +123,7 @@ app.get("/api/team", (req, res) => {
   }
 });
 
-// Ruaj listën e anëtarëve
+// Endpoint për të ruajtur anëtarët e ekipit
 app.post("/api/team", (req, res) => {
   try {
     const team = req.body;
@@ -132,4 +135,16 @@ app.post("/api/team", (req, res) => {
   }
 });
 
+// Faqja kryesore
+app.get("/", (req, res) => {
+  res.send("FizioPlus API Server is running");
+});
+
+// Error handler
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).send("Something broke!");
+});
+
+// Nis serverin
 app.listen(3001, () => console.log("Serveri është duke punuar në portin 3001"));
