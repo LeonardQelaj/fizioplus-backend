@@ -1,15 +1,14 @@
-// server.js
 const express = require("express");
-const fs = require("fs");
-const path = require("path");
 const cors = require("cors");
+const mongoose = require("mongoose");
 const cloudinary = require("cloudinary").v2;
 const { auth } = require("express-oauth2-jwt-bearer");
+require("dotenv").config(); // Lexon .env për MONGODB_URI
 
 const app = express();
 app.use(express.json());
 
-// ✅ Konfiguro CORS për Netlify + localhost
+// ✅ Konfiguro CORS për frontend (Netlify + localhost)
 app.use(
   cors({
     origin: ["https://fizioplus.netlify.app", "http://localhost:3000"],
@@ -19,25 +18,42 @@ app.use(
   })
 );
 
-// ✅ Siguria me JWT për endpoint-e të mbrojtura
-const checkJwt = auth({
-  audience: "https://fizioplus-api",
-  issuerBaseURL: "https://fizioplus.auth0.com/",
+// ✅ Lidhja me MongoDB Atlas
+mongoose
+  .connect(process.env.MONGODB_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
+  .then(() => console.log("✅ Lidhja me MongoDB u realizua"))
+  .catch((err) => console.error("❌ MongoDB gabim:", err));
+
+// ✅ Modelet Mongoose
+const ImageSchema = new mongoose.Schema({
+  key: String,
+  url: String,
 });
 
-// ✅ Cloudinary konfigurimi
+const TeamSchema = new mongoose.Schema({
+  name: String,
+  position: String,
+  image: String,
+});
+
+const Image = mongoose.model("Image", ImageSchema);
+const Team = mongoose.model("Team", TeamSchema);
+
+// ✅ Konfigurimi i Cloudinary
 cloudinary.config({
   cloud_name: "dt3j5h79o",
   api_key: "328292542925552",
   api_secret: "z_UDM6vdSussXTL5L-PqDUb0WkE",
 });
 
-// ✅ Rruga për të ruajtur të dhënat
-const dataDir = path.join(__dirname, "data");
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir);
-
-const IMAGES_FILE = path.join(dataDir, "images.json");
-const TEAM_FILE = path.join(dataDir, "team.json");
+// ✅ Autorizimi me JWT për endpoint-e të mbrojtura
+const checkJwt = auth({
+  audience: "https://fizioplus-api",
+  issuerBaseURL: "https://fizioplus.auth0.com/",
+});
 
 // ✅ SSE (Server Sent Events) për sinkronizim në kohë reale
 let clients = [];
@@ -47,6 +63,7 @@ function sendEventToAll(eventName, data) {
     res.write(`data: ${JSON.stringify(data)}\n\n`);
   });
 }
+
 app.get("/updates", (req, res) => {
   res.set({
     "Content-Type": "text/event-stream",
@@ -74,45 +91,49 @@ app.post("/api/upload", async (req, res) => {
   }
 });
 
-// ✅ API për marrjen e fotove
-app.get("/api/get-images", (req, res) => {
+// ✅ Merr fotot nga MongoDB
+app.get("/api/get-images", async (req, res) => {
   try {
-    if (!fs.existsSync(IMAGES_FILE)) return res.json({});
-    const data = fs.readFileSync(IMAGES_FILE, "utf-8");
-    res.json(JSON.parse(data));
+    const images = await Image.find({});
+    res.json(images);
   } catch (err) {
-    res.status(500).json({ error: "Gabim gjatë leximit të fotove." });
+    res.status(500).json({ error: "Gabim gjatë marrjes së fotove." });
   }
 });
 
-// ✅ API për ruajtjen e fotove (me siguri)
-app.post("/api/save-images", checkJwt, (req, res) => {
+// ✅ Ruaj fotot në MongoDB (me JWT)
+app.post("/api/save-images", checkJwt, async (req, res) => {
   try {
-    fs.writeFileSync(IMAGES_FILE, JSON.stringify(req.body, null, 2));
-    Object.entries(req.body).forEach(([key, url]) => {
+    await Image.deleteMany({});
+    const images = Object.entries(req.body).map(([key, url]) => ({ key, url }));
+    await Image.insertMany(images);
+
+    // Dërgo përditësime te klientët përmes SSE
+    images.forEach(({ key, url }) => {
       sendEventToAll("imageUpdate", { key, url });
     });
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: "Gabim në ruajtjen e fotove." });
   }
 });
 
-// ✅ API për marrjen e ekipit
-app.get("/api/team", (req, res) => {
+// ✅ Merr anëtarët e ekipit
+app.get("/api/team", async (req, res) => {
   try {
-    if (!fs.existsSync(TEAM_FILE)) return res.json([]);
-    const data = fs.readFileSync(TEAM_FILE, "utf-8");
-    res.json(JSON.parse(data));
+    const team = await Team.find({});
+    res.json(team);
   } catch (err) {
     res.status(500).json({ error: "Gabim në marrjen e ekipit." });
   }
 });
 
-// ✅ API për ruajtjen e ekipit
-app.post("/api/team", (req, res) => {
+// ✅ Ruaj anëtarët e ekipit (me JWT)
+app.post("/api/team", checkJwt, async (req, res) => {
   try {
-    fs.writeFileSync(TEAM_FILE, JSON.stringify(req.body, null, 2));
+    await Team.deleteMany({});
+    await Team.insertMany(req.body);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: "Gabim në ruajtjen e ekipit." });
