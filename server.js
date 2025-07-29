@@ -3,12 +3,12 @@ const cors = require("cors");
 const mongoose = require("mongoose");
 const cloudinary = require("cloudinary").v2;
 const { auth } = require("express-oauth2-jwt-bearer");
-require("dotenv").config(); // Lexon .env për MONGODB_URI
+require("dotenv").config();
 
 const app = express();
 app.use(express.json());
 
-// ✅ Konfiguro CORS për frontend (Netlify + localhost)
+// CORS
 app.use(
   cors({
     origin: ["https://fizioplus.netlify.app", "http://localhost:3000"],
@@ -18,7 +18,7 @@ app.use(
   })
 );
 
-// ✅ Lidhja me MongoDB Atlas
+// Lidhje me MongoDB Atlas
 mongoose
   .connect(process.env.MONGODB_URI, {
     useNewUrlParser: true,
@@ -27,7 +27,7 @@ mongoose
   .then(() => console.log("✅ Lidhja me MongoDB u realizua"))
   .catch((err) => console.error("❌ MongoDB gabim:", err));
 
-// ✅ Modelet Mongoose
+// Modelet Mongoose
 const ImageSchema = new mongoose.Schema({
   key: String,
   url: String,
@@ -42,20 +42,20 @@ const TeamSchema = new mongoose.Schema({
 const Image = mongoose.model("Image", ImageSchema);
 const Team = mongoose.model("Team", TeamSchema);
 
-// ✅ Konfigurimi i Cloudinary
+// Konfigurimi Cloudinary
 cloudinary.config({
   cloud_name: "dt3j5h79o",
   api_key: "328292542925552",
   api_secret: "z_UDM6vdSussXTL5L-PqDUb0WkE",
 });
 
-// ✅ Autorizimi me JWT për endpoint-e të mbrojtura
+// Autorizimi JWT
 const checkJwt = auth({
   audience: "https://fizioplus-api",
   issuerBaseURL: "https://fizioplus.auth0.com/",
 });
 
-// ✅ SSE (Server Sent Events) për sinkronizim në kohë reale
+// SSE (Server Sent Events) për sinkronizim në kohë reale
 let clients = [];
 function sendEventToAll(eventName, data) {
   clients.forEach((res) => {
@@ -78,7 +78,7 @@ app.get("/updates", (req, res) => {
   });
 });
 
-// ✅ Upload foto në Cloudinary
+// Upload foto në Cloudinary
 app.post("/api/upload", async (req, res) => {
   try {
     const result = await cloudinary.uploader.upload(req.body.image, {
@@ -91,7 +91,7 @@ app.post("/api/upload", async (req, res) => {
   }
 });
 
-// ✅ Merr fotot nga MongoDB
+// Merr fotot nga MongoDB
 app.get("/api/get-images", async (req, res) => {
   try {
     const images = await Image.find({});
@@ -101,7 +101,7 @@ app.get("/api/get-images", async (req, res) => {
   }
 });
 
-// ✅ Ruaj fotot në MongoDB (me JWT)
+// Ruaj fotot në MongoDB (me JWT)
 app.post("/api/save-images", checkJwt, async (req, res) => {
   try {
     await Image.deleteMany({});
@@ -119,7 +119,7 @@ app.post("/api/save-images", checkJwt, async (req, res) => {
   }
 });
 
-// ✅ Merr anëtarët e ekipit
+// Merr anëtarët e ekipit
 app.get("/api/team", async (req, res) => {
   try {
     const team = await Team.find({});
@@ -129,7 +129,7 @@ app.get("/api/team", async (req, res) => {
   }
 });
 
-// ✅ Ruaj anëtarët e ekipit (me JWT)
+// Ruaj anëtarët e ekipit (me JWT)
 app.post("/api/team", checkJwt, async (req, res) => {
   try {
     await Team.deleteMany({});
@@ -140,17 +140,17 @@ app.post("/api/team", checkJwt, async (req, res) => {
   }
 });
 
-// ✅ Faqja bazë
+// Faqja bazë
 app.get("/", (req, res) => {
   res.send("FizioPlus API Server is running.");
 });
 
-// ✅ Error handler
+// Error handler
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).send("Diçka shkoi keq.");
 });
 
-// ✅ Nis serverin
+// Nis serverin
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`✅ Serveri po punon në portin ${PORT}`));
